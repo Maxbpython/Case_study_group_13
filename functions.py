@@ -14,7 +14,9 @@ def sample_uniform_parameters(
     k, # Nr. DMUs
     min_value=10,
     max_value=20,
+    seed=42
 ):
+    np.random.seed(seed)
     return pd.DataFrame(
         data=np.random.uniform(
             low=min_value,
@@ -22,6 +24,22 @@ def sample_uniform_parameters(
             size=(i, k),
         )
     )
+
+def sample_correlated_parameters(
+    i, # Nr. Paramaters
+    k, # Nr. DMUs
+    rho,
+    min_value=10,
+    max_value=200,
+    seed=42
+):
+    x = sample_uniform_parameters(i, k, min_value, max_value, seed=seed)
+    for n in range(1,x.shape[1]):
+        for j in range(x.shape[1]-1):
+            if n != j:
+                w = np.random.uniform(10, 20)
+                x.loc[:, n] = rho * x.loc[:, j] + w * np.sqrt(1 - rho**2)
+    return x
 
 
 def output_from_parameters(
@@ -135,6 +153,6 @@ def perform_CNLS_LASSO(
     y_true = y.T.values
     y_log = np.log(output_from_parameters_with_noise(x).T.values)
 
-    model = CNLS_LASSO(y_log, x_, z=None, eta=eta, cet = CET_MULT, fun = FUN_PROD, rts = RTS_VRS)
+    model = CNLS_LASSO(y_log, x_, z=None, eta=eta, cet = CET_ADDI, fun = FUN_PROD, rts = RTS_VRS)
     model.optimize('maxklaasbakker@gmail.com')
     return model
