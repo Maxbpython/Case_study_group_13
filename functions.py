@@ -30,7 +30,7 @@ def sample_correlated_parameters(
     k, # Nr. DMUs
     rho,
     min_value=10,
-    max_value=200,
+    max_value=20,
     seed=42
 ):
     x = sample_uniform_parameters(i, k, min_value, max_value, seed=seed)
@@ -156,3 +156,54 @@ def perform_CNLS_LASSO(
     model = CNLS_LASSO(y_log, x_, z=None, eta=eta, cet = CET_ADDI, fun = FUN_PROD, rts = RTS_VRS)
     model.optimize('maxklaasbakker@gmail.com')
     return model
+
+def objective_beta_unique(
+    params
+):
+    global X_O
+    return params[0] + sum([x * y for x, y in zip(params[1:], X_O)])
+
+def beta_constraints(
+    beta,
+    alpha,
+    x
+    ):
+    return alpha +(x.T*beta).sum(axis=1)
+
+def obtain_beta_unique(
+    x,
+    alpha,
+    beta
+):
+    """
+    This function will give the lower bound for beta so that we get a unique value for beta
+    This is done by minimizing the objective function with the given constraints
+    Reasoning behind this is given in the report
+    """
+    constraint_beta = beta_constraints(beta, alpha,x)
+
+    K = x.shape[1]
+    I = x.shape[0]
+    global X_O
+
+    Beta_0 = {}
+    for O in range(K):
+        X_O = x[O] 
+        constraint_1 = constraint_beta[O]
+        linear_constraint_alpha_beta = LinearConstraint(
+            ############ CONSTRAINT MATRIX ############
+            # Constraint matrix for alpha+sum(beta*X)
+            [[-1]+(-x[k].values).tolist() for k in range(K)]+ 
+            # Constraint matrix for Beta
+            np.array([np.zeros(I).tolist()]+ np.identity(I).tolist()).T.tolist(),
+            ############### LOWER BOUND ###############
+            [-np.inf]*K+np.zeros(I).tolist(),
+            ############### UPPER BOUND ###############
+            (-constraint_beta).tolist()+
+            [beta[O].sum() for i in range(I)])
+            
+        
+        # Initialize the [alpha] and [beta] for the optimization of theta
+        x0 = [alpha[O]]+beta[O].tolist()
+        Beta_0[O] = minimize(objective_beta_unique, x0, method='trust-constr',constraints=[linear_constraint_alpha_beta],options={'verbose': 1})['x']
+    return pd.DataFrame(Beta_0)
