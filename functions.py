@@ -41,6 +41,14 @@ def sample_correlated_parameters(
                 x.loc[:, n] = rho * x.loc[:, j] + w * np.sqrt(1 - rho**2)
     return x
 
+def add_random_variables(
+    x,
+    i,
+    seed=50
+):
+    k = len(x.T)
+    np.random.seed(seed)
+    return pd.concat([x, sample_uniform_parameters(i,k, seed=seed)], axis=0).reset_index(drop=True)
 
 def output_from_parameters(
     x
@@ -56,7 +64,7 @@ def output_from_parameters_with_noise(
 ):
     y = output_from_parameters(x)
     np.random.seed(42)
-    y= y* np.exp(pd.DataFrame(np.abs(np.random.normal(0, 0.7, size=y.shape[1]))).T)
+    y= y* np.exp(pd.DataFrame(np.abs(np.random.normal(0, var, size=y.shape[1]))).T)
     return y
 
 def theta_objective(
@@ -108,7 +116,7 @@ def obtain_theta(
         
         # Initialize the [theta] and [lambda] for the optimization of theta
         x0 = [0]+[1/K for i in range(K)]
-        Theta_0[O] = minimize(theta_objective, x0, method='trust-constr',constraints=[linear_constraint_lambda_x_y],options={'verbose': 1})['x'][0]
+        Theta_0[O] = minimize(theta_objective, x0, method='trust-constr',constraints=[linear_constraint_lambda_x_y],options={'disp': False})['x'][0]
     return pd.DataFrame(Theta_0, index=[0])
 
 
@@ -205,5 +213,5 @@ def obtain_beta_unique(
         
         # Initialize the [alpha] and [beta] for the optimization of theta
         x0 = [alpha[O]]+beta[O].tolist()
-        Beta_0[O] = minimize(objective_beta_unique, x0, method='trust-constr',constraints=[linear_constraint_alpha_beta],options={'verbose': 1})['x']
+        Beta_0[O] = minimize(objective_beta_unique, x0, method='trust-constr',constraints=[linear_constraint_alpha_beta],options={'disp': False})['x']
     return pd.DataFrame(Beta_0)

@@ -264,7 +264,7 @@ class CNLS_LASSO:
                                                           list(self.__model__.beta[:, :].value))])
         beta = pd.DataFrame(beta, columns=['Name', 'Key', 'Value'])
         beta = beta.pivot(index='Name', columns='Key', values='Value')
-        print(beta)
+        # print(beta)
         return beta.to_numpy()
 
     def get_residual(self):
