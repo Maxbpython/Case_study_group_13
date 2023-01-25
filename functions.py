@@ -25,21 +25,46 @@ def sample_uniform_parameters(
         ))
     )
 
+def create_corr_mat(rho_inputs, n):
+    # minimum number of correlation inputs (rho_inputs) is 2 and maximum is 5. Since variables have to be predefined.
+    rho = np.zeros((n, n))
+    np.fill_diagonal(rho, 1)
+    rho[0, 1] = rho[1, 0] = rho_inputs[0]
+    try:
+        rho[0, 2] = rho[2, 0] = rho_inputs[1]
+        rho[1, 2] = rho[2, 1] = rho_inputs[2]
+        rho[0, 3] = rho[3, 0] = rho_inputs[3]
+        rho[1, 3] = rho[3, 1] = rho_inputs[4]
+        rho[2, 3] = rho[3, 2] = rho_inputs[5]
+        rho[0, 4] = rho[4, 0] = rho_inputs[6]
+        rho[1, 4] = rho[4, 1] = rho_inputs[7]
+        rho[2, 4] = rho[4, 2] = rho_inputs[8]
+        rho[3, 4] = rho[4, 3] = rho_inputs[9]
+    except:
+        pass
+    
+    return rho
+
 def sample_correlated_parameters(
-    i, # Nr. Paramaters
+    n, # Nr. Parameters
     k, # Nr. DMUs
-    rho,
+    rho_vec,
     min_value=10,
     max_value=20,
     seed=42
 ):
-    x = sample_uniform_parameters(i, k, min_value, max_value, seed=seed)
-    for n in range(1,x.shape[1]):
-        for j in range(x.shape[1]-1):
-            if n != j:
+    x = sample_uniform_parameters(n, k, min_value, max_value)
+    rho_mat = create_corr_mat(rho_vec, n)
+    for i in range(1,x.shape[0]):
+        for j in range(x.shape[0]-1):
+            if i != j:
+                if rho_mat[i,j] == 0:
+                    continue
                 w = np.random.uniform(10, 20)
-                x.loc[:, n] = rho * x.loc[:, j] + w * np.sqrt(1 - rho**2)
+                x.loc[:, i] = rho_mat[i,j] * x.loc[:, j] + w * np.sqrt(1 - rho_mat[i,j]**2)
+                
     return x
+
 
 def add_random_variables(
     x,
