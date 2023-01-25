@@ -18,11 +18,11 @@ def sample_uniform_parameters(
 ):
     np.random.seed(seed)
     return pd.DataFrame(
-        data=np.random.uniform(
+        data=np.sort(np.random.uniform(
             low=min_value,
             high=max_value,
             size=(i, k),
-        )
+        ))
     )
 
 def sample_correlated_parameters(
@@ -44,27 +44,36 @@ def sample_correlated_parameters(
 def add_random_variables(
     x,
     i,
+    min_value=10,
+    max_value=20,
     seed=50
 ):
     k = len(x.T)
     np.random.seed(seed)
-    return pd.concat([x, sample_uniform_parameters(i,k, seed=seed)], axis=0).reset_index(drop=True)
+    return pd.concat([x, sample_uniform_parameters(i,k, min_value=min_value, max_value = max_value, seed=seed)], axis=0).reset_index(drop=True)
 
 def output_from_parameters(
-    x
+    x,
+    cons = 0
 ):
-    y= {}
-    for k in range(x.shape[1]):
-        y[k] = (x[k]**(1/(len(x)+1))).prod()
-    return pd.DataFrame(y, index=[0])
+    # y= {}
+    # for k in range(x.shape[1]):
+    #     y[k] = (x[k]**(1/(len(x)+1))).prod()
+    
+    y_log = cons + pd.DataFrame((1/(len(x)+1))*np.log(x).sum()).T
+        
+    return pd.DataFrame(y_log, index=[0])
 
 def output_from_parameters_with_noise(
     x,
+    cons = 0,
     var=0.7
 ):
-    y = output_from_parameters(x)
+    y = output_from_parameters(x, cons=cons)
     np.random.seed(42)
-    y= y* np.exp(pd.DataFrame(np.abs(np.random.normal(0, var, size=y.shape[1]))).T)
+    # y= y* np.exp(pd.DataFrame(np.abs(np.random.normal(0, var, size=(y.shape[0],y.shape[1]))).T)
+    error = np.abs(np.random.normal(0, var, size=(y.shape[0],y.shape[1])))
+    y = pd.DataFrame(y.values - error)
     return y
 
 def theta_objective(
@@ -157,11 +166,11 @@ def perform_CNLS_LASSO(
     """
     Perform the CNLS with LASSO
     """
-    x_ = x.T.values
-    y_true = y.T.values
-    y_log = np.log(output_from_parameters_with_noise(x).T.values)
+    x_T = x.T.values
+    y_log = y.T.values
+    # y_log = np.log(output_from_parameters_with_noise(x).T.values)
 
-    model = CNLS_LASSO(y_log, x_, z=None, eta=eta, cet = CET_ADDI, fun = FUN_PROD, rts = RTS_VRS)
+    model = CNLS_LASSO(y_log, x_T, z=None, eta=eta, cet = CET_ADDI, fun = FUN_PROD, rts = RTS_VRS)
     model.optimize('maxklaasbakker@gmail.com')
     return model
 
