@@ -25,36 +25,29 @@ def sample_uniform_parameters(
         ))
     )
 
-def create_corr_mat(rho_inputs, n):
+def create_corr_mat(rho_inputs:dict, n):
     # minimum number of correlation inputs (rho_inputs) is 2 and maximum is 5. Since variables have to be predefined.
     rho = np.zeros((n, n))
     np.fill_diagonal(rho, 1)
-    rho[0, 1] = rho[1, 0] = rho_inputs[0]
-    try:
-        rho[0, 2] = rho[2, 0] = rho_inputs[1]
-        rho[1, 2] = rho[2, 1] = rho_inputs[2]
-        rho[0, 3] = rho[3, 0] = rho_inputs[3]
-        rho[1, 3] = rho[3, 1] = rho_inputs[4]
-        rho[2, 3] = rho[3, 2] = rho_inputs[5]
-        rho[0, 4] = rho[4, 0] = rho_inputs[6]
-        rho[1, 4] = rho[4, 1] = rho_inputs[7]
-        rho[2, 4] = rho[4, 2] = rho_inputs[8]
-        rho[3, 4] = rho[4, 3] = rho_inputs[9]
-    except:
-        pass
-    
+    for i in rho_inputs.keys():
+        for j in rho_inputs[i].keys():
+            try:
+                rho[i-1, j-1] = rho[j-1, i-1] = rho_inputs[i][j]
+            except:
+                pass
     return rho
 
 def sample_correlated_parameters(
-    n, # Nr. Parameters
+    i, # Nr. Parameters
     k, # Nr. DMUs
-    rho_vec,
+    rho_dict,
     min_value=10,
     max_value=20,
     seed=42
 ):
-    x = sample_uniform_parameters(n, k, min_value, max_value)
-    rho_mat = create_corr_mat(rho_vec, n)
+    x = sample_uniform_parameters(i, k, min_value, max_value)
+    rho_mat = create_corr_mat(rho_dict, i)
+    np.random.seed(seed)
     for i in range(1,x.shape[0]):
         for j in range(x.shape[0]-1):
             if i != j:
@@ -76,6 +69,18 @@ def add_random_variables(
     k = len(x.T)
     np.random.seed(seed)
     return pd.concat([x, sample_uniform_parameters(i,k, min_value=min_value, max_value = max_value, seed=seed)], axis=0).reset_index(drop=True)
+
+def add_random_correlated_variables(
+    x,
+    i,
+    rho_dict,
+    min_value=10,
+    max_value=20,
+    seed=50
+):
+    k = len(x.T)
+    np.random.seed(seed)
+    return pd.concat([x, sample_correlated_parameters(i,k,rho_dict=rho_dict, min_value=min_value, max_value = max_value, seed=seed)], axis=0).reset_index(drop=True)
 
 def output_from_parameters(
     x,
@@ -100,6 +105,16 @@ def output_from_parameters_with_noise(
     error = np.abs(np.random.normal(0, var, size=(y.shape[0],y.shape[1])))
     y = pd.DataFrame(y.values - error)
     return y
+
+def delete_random_variables(x, seed):
+    if x.shape[0]==1:
+        return x, 0, 0
+    np.random.seed(seed)
+    nr_deletions = int(np.random.uniform(0,x.shape[0]-1))
+    sample_deletions = np.sort(np.random.choice(x.shape[0], nr_deletions, replace=False))
+    nr_true_variables_deleted = ((sample_deletions == 0) | (sample_deletions == 1)).sum()
+    x.drop(x.index[sample_deletions],inplace=True)
+    return x, nr_deletions, nr_true_variables_deleted
 
 def theta_objective(
     params
@@ -249,3 +264,66 @@ def obtain_beta_unique(
         x0 = [alpha[O]]+beta[O].tolist()
         Beta_0[O] = minimize(objective_beta_unique, x0, method='trust-constr',constraints=[linear_constraint_alpha_beta],options={'disp': False})['x']
     return pd.DataFrame(Beta_0)
+
+def retrieve_results(model_cnls):
+    beta = model_cnls.get_beta()
+    beta = pd.DataFrame(beta).round(3)
+    beta.loc['Total',:] = beta.sum(axis=0)
+    if beta.shape[1] == 1:
+        true_params = [0]
+    else:
+        true_params = [0,1]
+
+    ssr = (model_cnls.get_residual()**2).sum()
+    mse = (model_cnls.get_residual()**2).mean()
+    nr_variables_deleted =(beta.loc['Total',:] == 0).sum()
+    nr_correct_variables_deleted = (beta.loc['Total',true_params] == 0).sum()
+    return ssr, mse, nr_variables_deleted, nr_correct_variables_deleted
+
+def retrieve_results_regular_lasso(model_lasso, x,y_log):
+    beta = model_lasso.coef_
+    beta = pd.DataFrame(beta).T.round(3)
+    if beta.shape[1] == 1:
+        true_params = [0]
+    else:
+        true_params = [0,1]
+
+    ssr = ((y_log.T - pd.DataFrame(model_lasso.predict(np.log(x).T)))**2).sum()[0]
+    mse = ((y_log.T - pd.DataFrame(model_lasso.predict(np.log(x).T)))**2).mean()[0]
+    nr_variables_deleted = (beta.loc[0,:]==0).sum()
+    nr_correct_variables_deleted = (beta.loc[0,true_params]==0).sum()
+    return ssr, mse, nr_variables_deleted, nr_correct_variables_deleted
+
+def perform_grid_search_reg_LASSO(alphas=np.array([0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0]), reps=30):
+    #import packages
+    import numpy as np
+    import pandas as pd
+    from sklearn.linear_model import Lasso
+    from sklearn.model_selection import GridSearchCV
+
+    #create grid search
+    grid_search = GridSearchCV(estimator=Lasso(), param_grid={'alpha':alphas}, cv=5, scoring='neg_mean_squared_error')
+
+    #run grid search for each dataset and store results
+    all_results = []
+
+    for run in range(0,reps):
+        SEED = run
+        if CORRELATION:
+            x = sample_correlated_parameters(i=TRUE_INPUTS,k=NR_DMU, rho_dict=corrs, min_value=10, max_value=20, seed=SEED)
+        else:
+            x = sample_uniform_parameters(i=TRUE_INPUTS,k=NR_DMU, min_value=10, max_value=20, seed=SEED)
+
+        y_log = output_from_parameters_with_noise(x, cons=3, var=0.1)
+
+        if CORRELATION_REDUNDANT_VARIABLES:
+            x = add_random_correlated_variables(x, REDUNDANT_INPUTS, corrs, min_value = 10, max_value = 20, seed=SEED+1)
+        else:
+            x = add_random_variables(x, REDUNDANT_INPUTS, min_value = 10, max_value = 20, seed=SEED+1)
+        
+        grid_search.fit(np.log(x).T, y_log.T)
+        all_results.append(grid_search.best_params_['alpha'])
+
+    #calculate average alpha
+    average_alpha = np.mean(all_results)
+    return average_alpha
