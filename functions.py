@@ -18,11 +18,11 @@ def sample_uniform_parameters(
 ):
     np.random.seed(seed)
     return pd.DataFrame(
-        data=np.sort(np.random.uniform(
+        data=np.random.uniform(
             low=min_value,
             high=max_value,
             size=(i, k),
-        ))
+        )
     )
 
 def create_corr_mat(rho_inputs:dict, n):
