@@ -7,7 +7,96 @@ import statsmodels.api as sm
 from pystoned.constant import CET_ADDI, CET_MULT, FUN_PROD, OPT_LOCAL, RTS_VRS
 from pystoned.plot import plot2d
 from CNLS_alg import CNLS_LASSO
+import time
+from sklearn.linear_model import Lasso
 warnings.filterwarnings('ignore')
+
+def simulate_run(run, test2):
+    SEED = run
+    x = sample_uniform_parameters(i=2,k=25,min_value=10, max_value=20, seed=SEED)
+    time.sleep(0.1)
+    # y = simulate_output(A,x)
+    return x
+
+def run_simulation_CNLS_LASSO(run, CORRELATION, CORRELATION_REDUNDANT_VARIABLES, TRUE_INPUTS, REDUNDANT_INPUTS, NR_DMU, ETA, VAR_mu,corrs_TRUE, corrs_FALSE, EMAIL):
+    # This function will be fed to the multiprocessing.Pool.map function
+    # It will be run in parallel
+    
+    result_dict = {'SSR':{}, 'MSE':{}, 'nr_variables_deleted':{}, 'nr_correct_variables_deleted':{}}
+    SEED = run
+    if CORRELATION:
+        x = sample_correlated_parameters(i=TRUE_INPUTS,k=NR_DMU, rho_dict=corrs_TRUE, min_value=10, max_value=20, seed=SEED)
+    else:
+        x = sample_uniform_parameters(i=TRUE_INPUTS,k=NR_DMU, min_value=10, max_value=20, seed=SEED)
+
+    y_log_true = output_from_parameters(x, cons = 3)
+    y_log = output_from_parameters_with_noise(x, cons=3, var=VAR_mu)
+
+    if CORRELATION_REDUNDANT_VARIABLES:
+        x = add_random_correlated_variables(x, REDUNDANT_INPUTS, corrs_FALSE, min_value = 10, max_value = 20, seed=SEED+1)
+    else:
+        x = add_random_variables(x, REDUNDANT_INPUTS, min_value = 10, max_value = 20, seed=SEED+1)
+
+
+    model_cnls = perform_CNLS_LASSO(x=x, y=y_log, eta=ETA, email=EMAIL)
+    beta = model_cnls.get_beta()
+    alpha = model_cnls.get_alpha()
+    beta = pd.DataFrame(beta).round(2)
+    beta.loc['Total',:] = beta.mean(axis=0).round(2)
+    result_dict['SSR'] = SSR_model = (model_cnls.get_residual()**2).sum()
+    result_dict['MSE'] = MSE_model = (model_cnls.get_residual()**2).mean()
+    result_dict['nr_variables_deleted'] = nr_variables_deleted = (beta.loc['Total',:] == 0).sum()
+    result_dict['nr_correct_variables_deleted'] = nr_correct_variables_deleted = (beta.loc['Total',[0,1]] == 0).sum()
+    return result_dict
+
+def run_simulation_CNLS_LASSO_RANDOM(run, CORRELATION, CORRELATION_REDUNDANT_VARIABLES, TRUE_INPUTS, REDUNDANT_INPUTS, NR_DMU, ETA, VAR_mu,corrs_TRUE, corrs_FALSE, eta_reg_LASSO, EMAIL):
+    results_SCNLS_LASSO_run = {'SSR':{}, 'MSE':{}, 'nr_variables_deleted':{}, 'nr_correct_variables_deleted':{}}
+    results_random_run = {'SSR':{}, 'MSE':{}, 'nr_variables_deleted':{}, 'nr_correct_variables_deleted':{}}
+    results_reg_LASSO_run = {'SSR':{}, 'MSE':{}, 'nr_variables_deleted':{}, 'nr_correct_variables_deleted':{}}
+    
+    SEED = run
+    if CORRELATION:
+        x = sample_correlated_parameters(i=TRUE_INPUTS,k=NR_DMU, rho_dict=corrs_TRUE, min_value=10, max_value=20, seed=SEED)
+    else:
+        x = sample_uniform_parameters(i=TRUE_INPUTS,k=NR_DMU, min_value=10, max_value=20, seed=SEED)
+
+    y_log_true = output_from_parameters(x, cons = 3)
+    y_log = output_from_parameters_with_noise(x, cons=3, var=VAR_mu)
+
+    if CORRELATION_REDUNDANT_VARIABLES:
+        x = add_random_correlated_variables(x, REDUNDANT_INPUTS, corrs_FALSE, min_value = 10, max_value = 20, seed=SEED+1)
+    else:
+        x = add_random_variables(x, REDUNDANT_INPUTS, min_value = 10, max_value = 20, seed=SEED+1)
+    
+    x_random, nr_random_deletions, nr_random_true_variables_deleted = delete_random_variables(x, seed=SEED+2)
+
+    # SCNLS-LASSO
+    model_scnls_lasso = perform_CNLS_LASSO(x=x, y=y_log, eta=ETA, email=EMAIL)
+    ssr, mse, nr_variables_deleted_lasso, nr_correct_variables_deleted_lasso = retrieve_results(model_scnls_lasso)
+    results_SCNLS_LASSO_run['SSR'] = ssr
+    results_SCNLS_LASSO_run['MSE'] = mse
+    results_SCNLS_LASSO_run['nr_variables_deleted'] = nr_variables_deleted_lasso
+    results_SCNLS_LASSO_run['nr_correct_variables_deleted'] = nr_correct_variables_deleted_lasso
+
+    # Random deletion
+    model_random = perform_CNLS_LASSO(x=x_random, y=y_log, eta=0, email=EMAIL)
+    ssr, mse, _, _ = retrieve_results(model_random)
+    results_random_run['SSR'] = ssr
+    results_random_run['MSE'] = mse
+    results_random_run['nr_variables_deleted'] = nr_random_deletions
+    results_random_run['nr_correct_variables_deleted'] = nr_random_true_variables_deleted
+
+
+    # Regular LASSO
+    lasso_model = Lasso(alpha=eta_reg_LASSO)
+    lasso_model.fit(np.log(x).T, y_log.T)
+    ssr, mse, nr_variables_deleted_reg_lasso, nr_correct_variables_deleted_reg_lasso = retrieve_results_regular_lasso(lasso_model, x, y_log)
+    results_reg_LASSO_run['SSR'] = ssr
+    results_reg_LASSO_run['MSE'] = mse
+    results_reg_LASSO_run['nr_variables_deleted'] = nr_variables_deleted_reg_lasso
+    results_reg_LASSO_run['nr_correct_variables_deleted'] = nr_correct_variables_deleted_reg_lasso
+
+    return results_SCNLS_LASSO_run, results_random_run, results_reg_LASSO_run
 
 def sample_uniform_parameters(
     i, # Nr. Paramaters
@@ -202,6 +291,7 @@ def perform_CNLS_LASSO(
     x,
     y,
     eta,
+    email:str
 ):
     """
     Perform the CNLS with LASSO
@@ -211,7 +301,7 @@ def perform_CNLS_LASSO(
     # y_log = np.log(output_from_parameters_with_noise(x).T.values)
 
     model = CNLS_LASSO(y_log, x_T, z=None, eta=eta, cet = CET_ADDI, fun = FUN_PROD, rts = RTS_VRS)
-    model.optimize('maxklaasbakker@gmail.com')
+    model.optimize(email)
     return model
 
 def objective_beta_unique(
@@ -267,8 +357,8 @@ def obtain_beta_unique(
 
 def retrieve_results(model_cnls):
     beta = model_cnls.get_beta()
-    beta = pd.DataFrame(beta).round(3)
-    beta.loc['Total',:] = beta.sum(axis=0)
+    beta = pd.DataFrame(beta).round(2)
+    beta.loc['Total',:] = beta.mean(axis=0).round(2)
     if beta.shape[1] == 1:
         true_params = [0]
     else:
