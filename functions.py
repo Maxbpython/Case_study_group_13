@@ -9,6 +9,11 @@ from pystoned.plot import plot2d
 from CNLS_alg import CNLS_LASSO
 import time
 from sklearn.linear_model import Lasso
+from sklearn.model_selection import GridSearchCV
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+import kneed
+
 warnings.filterwarnings('ignore')
 
 def simulate_run(run, test2):
@@ -97,6 +102,103 @@ def run_simulation_CNLS_LASSO_RANDOM(run, CORRELATION, CORRELATION_REDUNDANT_VAR
     results_reg_LASSO_run['nr_correct_variables_deleted'] = nr_correct_variables_deleted_reg_lasso
 
     return results_SCNLS_LASSO_run, results_random_run, results_reg_LASSO_run
+
+def run_simulation_regular_LASSO(run, CORRELATION, CORRELATION_REDUNDANT_VARIABLES, TRUE_INPUTS, REDUNDANT_INPUTS, NR_DMU, ETA, VAR_mu,corrs_TRUE, corrs_FALSE, eta_reg_LASSO, EMAIL):
+    results_reg_LASSO_run = {'SSR':{}, 'MSE':{}, 'nr_variables_deleted':{}, 'nr_correct_variables_deleted':{}}
+    
+    SEED = run
+    if CORRELATION:
+        x = sample_correlated_parameters(i=TRUE_INPUTS,k=NR_DMU, rho_dict=corrs_TRUE, min_value=10, max_value=20, seed=SEED)
+    else:
+        x = sample_uniform_parameters(i=TRUE_INPUTS,k=NR_DMU, min_value=10, max_value=20, seed=SEED)
+
+    y_log_true = output_from_parameters(x, cons = 3)
+    y_log = output_from_parameters_with_noise(x, cons=3, var=VAR_mu)
+
+    if CORRELATION_REDUNDANT_VARIABLES:
+        x = add_random_correlated_variables(x, REDUNDANT_INPUTS, corrs_FALSE, min_value = 10, max_value = 20, seed=SEED+1)
+    else:
+        x = add_random_variables(x, REDUNDANT_INPUTS, min_value = 10, max_value = 20, seed=SEED+1)
+
+    # Regular LASSO
+    lasso_model = Lasso(alpha=eta_reg_LASSO)
+    lasso_model.fit(np.log(x).T, y_log.T)
+    ssr, mse, nr_variables_deleted_reg_lasso, nr_correct_variables_deleted_reg_lasso = retrieve_results_regular_lasso(lasso_model, x, y_log)
+    results_reg_LASSO_run['SSR'] = ssr
+    results_reg_LASSO_run['MSE'] = mse
+    results_reg_LASSO_run['nr_variables_deleted'] = nr_variables_deleted_reg_lasso
+    results_reg_LASSO_run['nr_correct_variables_deleted'] = nr_correct_variables_deleted_reg_lasso
+    results_reg_LASSO_run['ETA'] = eta_reg_LASSO
+
+    return results_reg_LASSO_run
+
+
+def run_simulation_PCA_DEA(run, CORRELATION, CORRELATION_REDUNDANT_VARIABLES, TRUE_INPUTS, REDUNDANT_INPUTS, NR_DMU, ETA, VAR_mu,corrs_TRUE, corrs_FALSE, EMAIL):
+    results_reg_PCA_run = {'SSR':{}, 'MSE':{}, 'nr_variables_deleted':{}, 'nr_correct_variables_deleted':{}}
+    
+    SEED = run
+    if CORRELATION:
+        x = sample_correlated_parameters(i=TRUE_INPUTS,k=NR_DMU, rho_dict=corrs_TRUE, min_value=10, max_value=20, seed=SEED)
+    else:
+        x = sample_uniform_parameters(i=TRUE_INPUTS,k=NR_DMU, min_value=10, max_value=20, seed=SEED)
+
+    y_log_true = output_from_parameters(x, cons = 3)
+    y_log = output_from_parameters_with_noise(x, cons=3, var=VAR_mu)
+
+    if CORRELATION_REDUNDANT_VARIABLES:
+        x = add_random_correlated_variables(x, REDUNDANT_INPUTS, corrs_FALSE, min_value = 10, max_value = 20, seed=SEED+1)
+    else:
+        x = add_random_variables(x, REDUNDANT_INPUTS, min_value = 10, max_value = 20, seed=SEED+1)
+    
+
+
+    pca_s = do_PCA(x)
+
+    dimension_reduction = x.shape[0]-pca_s.shape[0]
+
+    # PCA-DEA
+    model_pca = perform_CNLS_LASSO(x=pca_s, y=y_log, eta=0, email=EMAIL)
+    ssr, mse, _, _ = retrieve_results(model_pca)
+    results_reg_PCA_run['SSR'] = ssr
+    results_reg_PCA_run['MSE'] = mse
+    results_reg_PCA_run['nr_variables_deleted'] = dimension_reduction
+    results_reg_PCA_run['nr_correct_variables_deleted'] = np.nan
+
+    return results_reg_PCA_run
+
+
+def run_simulation_RANDOM(run, CORRELATION, CORRELATION_REDUNDANT_VARIABLES, TRUE_INPUTS, REDUNDANT_INPUTS, NR_DMU, ETA, VAR_mu,corrs_TRUE, corrs_FALSE, EMAIL):
+    results_random_run = {'SSR':{}, 'MSE':{}, 'nr_variables_deleted':{}, 'nr_correct_variables_deleted':{}}
+    
+    SEED = run
+    if CORRELATION:
+        x = sample_correlated_parameters(i=TRUE_INPUTS,k=NR_DMU, rho_dict=corrs_TRUE, min_value=10, max_value=20, seed=SEED)
+    else:
+        x = sample_uniform_parameters(i=TRUE_INPUTS,k=NR_DMU, min_value=10, max_value=20, seed=SEED)
+
+    y_log_true = output_from_parameters(x, cons = 3)
+    y_log = output_from_parameters_with_noise(x, cons=3, var=VAR_mu)
+
+    if CORRELATION_REDUNDANT_VARIABLES:
+        x = add_random_correlated_variables(x, REDUNDANT_INPUTS, corrs_FALSE, min_value = 10, max_value = 20, seed=SEED+1)
+    else:
+        x = add_random_variables(x, REDUNDANT_INPUTS, min_value = 10, max_value = 20, seed=SEED+1)
+    
+
+
+    x_random, nr_random_deletions, nr_random_true_variables_deleted = delete_random_variables(x, seed=SEED+2)
+
+    # Random deletion
+    model_random = perform_CNLS_LASSO(x=x_random, y=y_log, eta=0, email=EMAIL)
+    ssr, mse, _, _ = retrieve_results(model_random)
+    results_random_run['SSR'] = ssr
+    results_random_run['MSE'] = mse
+    results_random_run['nr_variables_deleted'] = nr_random_deletions
+    results_random_run['nr_correct_variables_deleted'] = nr_random_true_variables_deleted
+
+    return results_random_run
+
+
 
 def sample_uniform_parameters(
     i, # Nr. Paramaters
@@ -199,7 +301,7 @@ def delete_random_variables(x, seed):
     if x.shape[0]==1:
         return x, 0, 0
     np.random.seed(seed)
-    nr_deletions = int(np.random.uniform(0,x.shape[0]-1))
+    nr_deletions = int(np.random.uniform(0,x.shape[0]))
     sample_deletions = np.sort(np.random.choice(x.shape[0], nr_deletions, replace=False))
     nr_true_variables_deleted = ((sample_deletions == 0) | (sample_deletions == 1)).sum()
     x.drop(x.index[sample_deletions],inplace=True)
@@ -384,12 +486,53 @@ def retrieve_results_regular_lasso(model_lasso, x,y_log):
     nr_correct_variables_deleted = (beta.loc[0,true_params]==0).sum()
     return ssr, mse, nr_variables_deleted, nr_correct_variables_deleted
 
-def perform_grid_search_reg_LASSO(alphas=np.array([0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0]), reps=30):
-    #import packages
-    import numpy as np
-    import pandas as pd
-    from sklearn.linear_model import Lasso
-    from sklearn.model_selection import GridSearchCV
+def retrieve_incremental_results(results:pd.DataFrame):
+    
+    SSR = results.loc[:,results.columns.str.startswith('SSR_')].mean().reset_index(drop=True)
+    MSE = results.loc[:,results.columns.str.startswith('MSE_')].mean().reset_index(drop=True)
+    nr_variables_deleted = results.loc[:,results.columns.str.startswith('nr_variables_deleted_')].mean().reset_index(drop=True)
+    nr_correct_variables_deleted = results.loc[:,results.columns.str.startswith('nr_correct_variables_deleted_')].mean().reset_index(drop=True)
+    probability_selecting_two_true_inputs =         results.loc[:,results.columns.str.startswith('nr_correct_variables_deleted_')].apply(lambda x: x==0).mean().reset_index(drop=True)
+    probability_selecting_at_least_one_true_input = results.loc[:,results.columns.str.startswith('nr_correct_variables_deleted_')].apply(lambda x: x==1).mean().reset_index(drop=True)+probability_selecting_two_true_inputs
+    probability_selecting_zero_true_inputs =        results.loc[:,results.columns.str.startswith('nr_correct_variables_deleted_')].apply(lambda x: x==2).mean().reset_index(drop=True)
+    
+    # this is only relevant for regular lasso
+    try:
+        ETA = results.loc[:,results.columns.str.startswith('ETA_')].mean().reset_index(drop=True)
+    except:
+        ETA = None
+
+    results = pd.DataFrame(data={
+        'SSR':SSR, 'MSE':MSE, 'ETA':ETA, 'nr_variables_deleted':nr_variables_deleted, 'nr_correct_variables_deleted':nr_correct_variables_deleted, 
+        'Probability of selecting 2 true inputs':probability_selecting_two_true_inputs, 
+        'Probability of selecting at least 1 true input':probability_selecting_at_least_one_true_input, 
+        'Probability of selecting 0 true inputs':probability_selecting_zero_true_inputs})
+
+    results['nr_false_variables_deleted'] = results['nr_variables_deleted'] - results['nr_correct_variables_deleted']
+    results['correct_deletion_ratio'] = results['nr_correct_variables_deleted'] / results['nr_variables_deleted']
+    results['false_deletion_ratio'] = (results['nr_false_variables_deleted'] / results['nr_variables_deleted']).fillna(1)
+    
+    return results.reset_index().rename(columns={'index': 'DMU'}).assign(DMU = lambda x: x['DMU']+1)
+
+def results_from_matrix(results:pd.DataFrame):
+    results['nr_false_variables_deleted'] = results['nr_variables_deleted'] - results['nr_correct_variables_deleted']
+    try :
+        avg_MSE = results.mean()['MSE']
+    except:
+        avg_MSE = np.nan
+    avg_nr_variables_deleted = results.mean()['nr_variables_deleted']
+    avg_nr_correct_variables_deleted = results.mean()['nr_correct_variables_deleted']
+    avg_nr_false_variables_deleted = results.mean()['nr_false_variables_deleted']
+    correct_ratio = avg_nr_correct_variables_deleted/avg_nr_variables_deleted
+    false_ratio = avg_nr_false_variables_deleted/avg_nr_variables_deleted
+    ratio_of_zero_correct_vars_deleted = results[results['nr_correct_variables_deleted']==0].shape[0]/results.shape[0]
+    ratio_of_at_least_one_correct_vars_deleted = results[results['nr_correct_variables_deleted']==1].shape[0]/results.shape[0] +results[results['nr_correct_variables_deleted']==0].shape[0]/results.shape[0]
+    ratio_of_two_correct_vars_deleted = results[results['nr_correct_variables_deleted']==2].shape[0]/results.shape[0]
+    return avg_MSE, avg_nr_variables_deleted, avg_nr_correct_variables_deleted, avg_nr_false_variables_deleted, correct_ratio, false_ratio, ratio_of_zero_correct_vars_deleted, ratio_of_at_least_one_correct_vars_deleted, ratio_of_two_correct_vars_deleted
+
+def perform_grid_search_reg_LASSO(alphas=np.array([0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0]), reps=30, 
+    CORRELATION=True, CORRELATION_REDUNDANT_VARIABLES=True, TRUE_INPUTS=2, REDUNDANT_INPUTS=9, 
+    NR_DMU=25, VAR_mu=0.1, corrs_TRUE=None, corrs_FALSE=None):
 
     #create grid search
     grid_search = GridSearchCV(estimator=Lasso(), param_grid={'alpha':alphas}, cv=5, scoring='neg_mean_squared_error')
@@ -400,14 +543,14 @@ def perform_grid_search_reg_LASSO(alphas=np.array([0.01, 0.1, 0.2, 0.3, 0.4, 0.5
     for run in range(0,reps):
         SEED = run
         if CORRELATION:
-            x = sample_correlated_parameters(i=TRUE_INPUTS,k=NR_DMU, rho_dict=corrs, min_value=10, max_value=20, seed=SEED)
+            x = sample_correlated_parameters(i=TRUE_INPUTS,k=NR_DMU, rho_dict=corrs_TRUE, min_value=10, max_value=20, seed=SEED)
         else:
             x = sample_uniform_parameters(i=TRUE_INPUTS,k=NR_DMU, min_value=10, max_value=20, seed=SEED)
 
-        y_log = output_from_parameters_with_noise(x, cons=3, var=0.1)
+        y_log = output_from_parameters_with_noise(x, cons=3, var=VAR_mu)
 
         if CORRELATION_REDUNDANT_VARIABLES:
-            x = add_random_correlated_variables(x, REDUNDANT_INPUTS, corrs, min_value = 10, max_value = 20, seed=SEED+1)
+            x = add_random_correlated_variables(x, REDUNDANT_INPUTS, corrs_FALSE, min_value = 10, max_value = 20, seed=SEED+1)
         else:
             x = add_random_variables(x, REDUNDANT_INPUTS, min_value = 10, max_value = 20, seed=SEED+1)
         
@@ -417,3 +560,53 @@ def perform_grid_search_reg_LASSO(alphas=np.array([0.01, 0.1, 0.2, 0.3, 0.4, 0.5
     #calculate average alpha
     average_alpha = np.mean(all_results)
     return average_alpha
+
+def do_PCA(X, get_components=True, n=0.95,method='Kaiser'):
+    """
+    Purpose:
+      returns n principal components from data X, and contribution table for PC's
+      prints scree plot, bi-plot and variation explained
+    inputs:
+      n: number of components to return
+      X: data containing vectors that needs to be reduced, stacked horizontally
+      get_components: True: return components according to method
+      method: None, default value - selects all PCs that cumulatively account for at least 80% of variation
+              Broken-stick : take PCAs where elbow is. i.e. scree plot slope flattens sharply
+              Kaiser : take PCAs where eigenvalue is above 1
+              
+    output: 
+      principalDf: if get_components == True, data frame where first column is the first Principal Component
+    
+    """
+    X=X.T
+    PCAcolumns=X.columns
+
+    x = X.loc[:, PCAcolumns].values
+
+    x = StandardScaler().fit_transform(x)
+    n_comp=0.95
+
+    pca = PCA(n_components=n_comp)
+    principalComponents = pca.fit_transform(x)
+    eigenvalues=pca.components_
+
+    PC_columns=[]
+    for i in range(1,principalComponents.shape[1]+1):
+        PC_columns.append("PC%s"%i)
+    
+    principalDf = pd.DataFrame(data = principalComponents,columns = PC_columns)
+    
+    coef=eigenvalues
+    df=np.around(abs(coef)/sum(abs(coef)),2)
+    df=np.vstack([df.T,np.around(pca.explained_variance_ratio_,3),np.around(pca.explained_variance_,3)])
+    ind = ['var'+str(v) for v in X.columns]
+    ind.extend(['% of Variation Explained','eigen values'])
+    df=pd.DataFrame(df, columns=principalDf.columns, index=ind).T 
+
+    if get_components==True:
+        if method=='Kaiser':
+            return principalDf[principalDf.columns.intersection(df[df['eigen values']>=1].index)].T
+        elif method=='Broken-stick':
+            return principalDf.iloc[:,:elbow_point]
+        else:
+            return principalDf
