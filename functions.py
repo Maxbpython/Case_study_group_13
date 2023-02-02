@@ -51,7 +51,10 @@ def run_simulation_CNLS_LASSO(run, CORRELATION, CORRELATION_REDUNDANT_VARIABLES,
     result_dict['SSR'] = SSR_model = (model_cnls.get_residual()**2).sum()
     result_dict['MSE'] = MSE_model = (model_cnls.get_residual()**2).mean()
     result_dict['nr_variables_deleted'] = nr_variables_deleted = (beta.loc['Total',:] == 0).sum()
-    result_dict['nr_correct_variables_deleted'] = nr_correct_variables_deleted = (beta.loc['Total',[0,1]] == 0).sum()
+    try:
+        result_dict['nr_correct_variables_deleted'] = nr_correct_variables_deleted = (beta.loc['Total',[0,1]] == 0).sum()
+    except:
+        result_dict['nr_correct_variables_deleted'] = nr_correct_variables_deleted = (beta.loc['Total',0] == 0).sum()
     return result_dict
 
 def run_simulation_CNLS_LASSO_RANDOM(run, CORRELATION, CORRELATION_REDUNDANT_VARIABLES, TRUE_INPUTS, REDUNDANT_INPUTS, NR_DMU, ETA, VAR_mu,corrs_TRUE, corrs_FALSE, eta_reg_LASSO, EMAIL):
